@@ -1,0 +1,21 @@
+[tool.poetry]
+name = "port"
+version = "0.0.0"
+description = "Port package with Data DataSubmission"
+authors = ["Emiel van der Veen <e.vanderveen@eyra.co>"]
+include = [{ path = "port/assets", format = ["sdist", "wheel"] }]
+
+[tool.poetry.dependencies]
+python = ">=3.10"
+pandas = "^1.5"
+numpy = "^1.24"
+beautifulsoup4 = "^4.12.2"
+python-dateutil = "^2.9.0.post0"
+
+
+[tool.poetry.group.test.dependencies]
+pytest = "^7.4.2"
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
