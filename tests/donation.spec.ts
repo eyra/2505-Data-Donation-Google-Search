@@ -27,15 +27,19 @@ async function setupTestWithFileUpload(page: Page): Promise<void> {
 /**
  * Helper to handle data submission and return the submitted data
  */
-async function submitDataAndGetResult(page: Page): Promise<string | null> {
-  const result = new Promise<string|null>((resolve) => {
+
+function setupRouteForDataSubmission(page: Page): Promise<string|null> {
+  return new Promise<string|null>((resolve) => {
     page.route('/data-submission', async route => {
       const json = {ok: true};
       await route.fulfill({ json });
       resolve(route.request().postData());
     });
   });
+}
 
+async function submitDataAndGetResult(page: Page): Promise<string | null> {
+  const result = setupRouteForDataSubmission(page);
   await page.getByText('Donate', { exact: true }).click();
   return result;
 }
