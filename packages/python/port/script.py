@@ -22,7 +22,7 @@ class DataFrameHandler(logging.Handler):
         self._data = []
 
     def emit(self, record):
-        self._data.append({"Level": record.levelname, "Message": record.getMessage()})
+        self._data.append({"Level": record.levelname, "Message": record.getMessage(), "Time": record.created})
 
     @property
     def df(self):
@@ -107,6 +107,7 @@ def process(sessionId):
         if consent_result.__type__ == "PayloadJSON":
             logger.info(f"{key}: donate consent data")
             yield donate(f"{sessionId}-{key}", consent_result.value)
+            yield donate(f"{sessionId}-{key}-log", log_handler.df.to_json(orient="records"))
         if consent_result.__type__ == "PayloadFalse":
             value = json.dumps(
                 {"status": "donation declined", "log": log_handler.df.to_dict()}
