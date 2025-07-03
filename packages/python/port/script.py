@@ -6,6 +6,8 @@ import dateutil.parser
 import pandas as pd
 import zipfile
 import json
+import re # new
+
 from urllib.parse import urlparse, parse_qs
 from bs4 import BeautifulSoup
 import dateutil.tz
@@ -37,12 +39,11 @@ logger = logging.getLogger(__name__)
 
 german_tz = dateutil.tz.gettz("Europe/Berlin")
 
-# Altered so that data is not filtered out
+# Include data from -365 days until current date
 # Use timezone-aware timestamps for comparison
-start_dt = pd.to_datetime("2020-01-12").tz_localize("CET")
-end_dt = pd.to_datetime("2030-03-02").tz_localize("CET") + pd.Timedelta(
-    days=1
-)  
+now = pd.Timestamp.now(tz="Europe/Berlin")
+start_dt = now - pd.Timedelta(days=365)
+end_dt = now + pd.Timedelta(days=1)  # include today
 
 
 def process(sessionId):
@@ -120,7 +121,7 @@ def render_donation_page(body):
         props.Translatable(
             {
                 "en": "Google Search History",
-                "de": "Google Suchverlauf",
+                "de": "Google-Suchverlauf",
                 "nl": "Google Zoekgeschiedenis",
             }
         )
@@ -135,7 +136,7 @@ def render_no_search_data_page():
         props.Translatable(
             {
                 "en": "No Google Search Data",
-                "de": "Keine Google Suchdaten",
+                "de": "Keine Google-Suchdaten",
                 "nl": "Geen Google Zoekgegevens",
             }
         )
@@ -145,7 +146,7 @@ def render_no_search_data_page():
         text=props.Translatable(
             {
                 "en": "Your data package does not contain any Google search data, either because you did not request it during data export, or your privacy settings at Google are set this way. By clicking End, you can complete your study participation.",
-                "de": "Ihr Datenpaket enthält keine Google Suchdaten, da Sie diese entweder beim Datenexport nicht angefordert haben, oder Ihre Privatsphäre-Einstellungen bei Google dies so festlegen. Mit Klicken auf Beenden können Sie Ihre Studienteilnahme abschließen.",
+                "de": "Ihr Datenpaket enthält keine Google Suchdaten, da Sie diese entweder beim Datenexport nicht angefordert haben, oder Ihre Privatsphäre-Einstellungen bei Google dies so festlegen. Mit Klicken auf 'Beenden' gelangen Sie zurück zur Übersicht. Wenn Sie sich nicht sicher sind, dass Sie ausschließlich 'Meine Aktivitären' bei Google angefordert haben, können Sie erneut mit Schritt '(1) Daten anfordern & herunterladen' beginnen. Andernfalls können Sie die Kurzbefragung starten – wir würden uns sehr über Ihre Teilnahme freuen!",
                 "nl": "Uw datapakket bevat geen Google-zoekgegevens, omdat u deze niet hebt aangevraagd tijdens de gegevensexport, of omdat uw privacy-instellingen bij Google zo zijn ingesteld. Door op Beëindigen te klikken, kunt u uw deelname aan de studie voltooien.",
             }
         ),
@@ -165,18 +166,18 @@ def retry_confirmation():
     text = props.Translatable(
         {
             "en": "Unfortunately, we cannot process your file. Continue, if you are sure that you selected the right file. Try again to select a different file.",
-            "de": "Leider können wir Ihre Datei nicht bearbeiten. Fahren Sie fort, wenn Sie sicher sind, dass Sie die richtige Datei ausgewählt haben. Versuchen Sie, eine andere Datei auszuwählen.",
+            "de": "Es sieht so aus, als hätten Sie eine falsche Datei ausgewählt. Bitte überprüfen Sie, ob Sie die originale ZIP-Datei Ihres Google-Suchverlauf geladen haben, und klicken Sie anschließend auf 'Erneut veruchen', um die korrekte Datei hochzuladen. Mit einem Klick auf 'Beenden' gelangen Sie zurück zur Übersicht. Dort können Sie die Kurzbefragung starten – wir würden uns sehr über Ihre Teilnahme freuen!",
             "nl": "Helaas, kunnen we uw bestand niet verwerken. Weet u zeker dat u het juiste bestand heeft gekozen? Ga dan verder. Probeer opnieuw als u een ander bestand wilt kiezen.",
         }
     )
     ok = props.Translatable(
         {
             "en": "Try again",
-            "de": "Versuchen Sie es noch einmal",
+            "de": "Erneut versuchen",
             "nl": "Probeer opnieuw",
         }
     )
-    cancel = props.Translatable({"en": "Continue", "de": "Weiter", "nl": "Verder"})
+    cancel = props.Translatable({"en": "Continue", "de": "Beenden", "nl": "Verder"})
     return props.PropsUIPromptConfirm(text, ok, cancel)
 
 
@@ -184,7 +185,7 @@ def prompt_file(extensions):
     description = props.Translatable(
         {
             "en": "Please select the zip file that you downloaded with your Google search history.",
-            "de": "Wählen Sie bitte die heruntergeladene ZIP Datei aus mit Ihren Google Suchverlauf.",
+            "de": "Wählen Sie bitte die heruntergeladene ZIP Datei aus mit Ihren Google-Suchverlauf.",
             "nl": "Selecteer een willekeurige zip file die u heeft opgeslagen op uw apparaat.",
         }
     )
@@ -276,6 +277,54 @@ def exit(code, info):
     return CommandSystemExit(code, info)
 
 
+def normalize_date_string(date_string):
+
+    # adjust Cyrillic date
+    if "г." in date_string or re.search(r"[а-яА-ЯёЁ]", date_string):
+        date_string = re.sub(r"\b([а-яА-ЯёЁ]{3,4})\.", r"\1", date_string)  # remove . after kyrillisch onth
+        date_string = re.sub(r"[\u202F\s]?г\.,?", "", date_string)  # remove r. (russian year)
+
+    # map month names
+    month_map = {
+        # Russian
+        "янв": "Jan", "фев": "Feb", "мар": "Mar", "апр": "Apr", "май": "May",
+        "июн": "Jun", "июл": "Jul", "авг": "Aug", "сен": "Sep",
+        "окт": "Oct", "ноя": "Nov", "дек": "Dec",
+
+        # Turkish
+        "oca": "Jan", "şub": "Feb", "mar": "Mar", "nis": "Apr", "mayıs": "May",
+        "haz": "Jun", "tem": "Jul", "ağu": "Aug", "eyl": "Sep",
+        "eki": "Oct", "kas": "Nov", "ara": "Dec",
+
+        # Spanish
+        "ene": "Jan", "feb": "Feb", "mar": "Mar", "abr": "Apr", "may": "May",
+        "jun": "Jun", "jul": "Jul", "ago": "Aug", "sep": "Sep",
+        "oct": "Oct", "nov": "Nov", "dic": "Dec",
+
+        # Italian
+        "gen": "Jan", "feb": "Feb", "mar": "Mar", "apr": "Apr", "mag": "May",
+        "giu": "Jun", "lug": "Jul", "ago": "Aug", "set": "Sep",
+        "ott": "Oct", "nov": "Nov", "dic": "Dec",
+
+        # French
+        "janv": "Jan", "févr": "Feb", "mars": "Mar", "avr": "Apr", "mai": "May",
+        "juin": "Jun", "juil": "Jul", "août": "Aug", "sept": "Sep",
+        "oct": "Oct", "nov": "Nov", "déc": "Dec",
+        "févr.": "Feb", "janv.": "Jan", "déc.": "Dec",
+
+        # Polish
+        "sty": "Jan", "lut": "Feb", "mar": "Mar", "kwi": "Apr", "maj": "May",
+        "cze": "Jun", "lip": "Jul", "sie": "Aug", "wrz": "Sep",
+        "paź": "Oct", "lis": "Nov", "gru": "Dec",
+    }
+
+    # replace month name, case-insensitiv
+    for local, eng in month_map.items():
+        date_string = re.sub(rf"\b{local}\b", eng, date_string, flags=re.IGNORECASE)
+
+    return date_string
+
+
 def is_google_search_url(url):
     """
     Determine if a URL is a Google search URL.
@@ -307,8 +356,8 @@ def is_google_search_url(url):
 
 def extract_search_data(data):
     if not isinstance(data, list):
-        return pd.DataFrame(columns=["Datum", "Nummer", "Suchbegriff"]), pd.DataFrame(
-            columns=["Datum", "Nummer", "Suchergebnis", "Link"]
+        return pd.DataFrame(columns=["Datum", "Uhrzeit", "Nummer", "Suchbegriff"]), pd.DataFrame(
+            columns=["Datum", "Uhrzeit", "Nummer", "Suchergebnis", "Link"]
         )
 
     searches = []
@@ -362,7 +411,19 @@ def extract_search_data(data):
                 item["title"] = title[len("Visited ") :]
             elif title.endswith(" aufgerufen"):
                 item["title"] = title[: -len(" aufgerufen")]
-            elif title.startswith("Viewed ") or title.endswith(" angesehen"):
+            elif title.startswith("Has visitado "):
+                item["title"] = title[len("Has visitado ") :]
+            elif title.startswith("Посещена страница "):
+                item["title"] = title[len("Посещена страница ") :]
+            elif title.startswith("Hai visitato "):
+                item["title"] = title[len("Hai visitato ") :]
+            elif title.startswith("Vous avez consulté "):
+                item["title"] = title[len("Vous avez consulté ") :]
+            elif title.endswith(" sayfasını ziyaret ettiniz"):
+                item["title"] = title[: -len(" sayfasını ziyaret ettiniz")]
+            elif title.startswith("Odwiedzono: "):
+                item["title"] = title[len("Odwiedzono: ") :]
+            elif title.startswith("Viewed ") or title.endswith(" angesehen") or title.startswith("Has visto ") or title.startswith("Просмотрено: ") or title.startswith("Hai visualizzato ") or title.startswith("Şunu görüntülediniz: ") or title.startswith("Obejrzano: "):
                 continue  # Skip Viewed items entirely
 
             if is_google_homepage(item["titleUrl"]):
@@ -375,16 +436,18 @@ def extract_search_data(data):
     for i, item in enumerate(records, start=1):
         timestamp = pd.to_datetime(item["time"])
         date = timestamp.strftime("%d-%m-%Y")
+        hour = timestamp.strftime("%H:00")
         index = str(i)
 
         final_url = resolve_google_redirect(item["titleUrl"])
         is_search, query = is_google_search_url(final_url)
         if is_search:
-            searches.append({"Datum": date, "Nummer": index, "Suchbegriff": query})
+            searches.append({"Datum": date, "Uhrzeit": hour, "Nummer": index, "Suchbegriff": query})
         else:
             clicks.append(
                 {
                     "Datum": date,
+                    "Uhrzeit": hour,
                     "Nummer": index,
                     "Suchergebnis": format_title(item["title"]),
                     "Link": final_url,
@@ -395,8 +458,8 @@ def extract_search_data(data):
     clicks_df = pd.DataFrame(clicks)
 
     # Ensure columns exist even if dataframes are empty
-    searches_df = searches_df.reindex(columns=["Datum", "Nummer", "Suchbegriff"])
-    clicks_df = clicks_df.reindex(columns=["Datum", "Nummer", "Suchergebnis", "Link"])
+    searches_df = searches_df.reindex(columns=["Datum", "Uhrzeit", "Nummer", "Suchbegriff"])
+    clicks_df = clicks_df.reindex(columns=["Datum", "Uhrzeit", "Nummer", "Suchergebnis", "Link"])
 
     return searches_df, clicks_df
 
@@ -434,9 +497,12 @@ def parse_google_search_json(file_obj):
             first_item = data[0]
             if all(
                 key in first_item
-                for key in ["header", "title", "time", "products", "titleUrl"]
+                for key in ["header", "title", "time", "products"]
             ) and any(
-                product in ["Search", "Google Suche"]
+                key in first_item
+                for key in ["titleUrl", "subtitles"]
+            ) and any(
+                product in ["Search", "Google Suche", "Búsqueda", "Recherche", "Поиск", "Ricerca", "Arama", "Wyszukiwarka"]
                 for product in first_item["products"]
             ):
                 return data
@@ -470,7 +536,7 @@ def parse_google_search_html(html_content):
                 continue
 
             header = header_elem.get_text(strip=True)
-            if header not in ["Google Suche", "Search"]:
+            if header not in ["Google Suche", "Search", "Búsqueda", "Recherche", "Поиск", "Ricerca", "Arama", "Wyszukiwarka"]:
                 continue
 
             # Get content
@@ -490,9 +556,11 @@ def parse_google_search_html(html_content):
             if len(parts) == 3:
                 title = " ".join(parts[:-1])
 
+                date_string = normalize_date_string(parts[-1])
+
                 try:
                     timestamp = dateutil.parser.parse(
-                        parts[-1],
+                        date_string,
                         tzinfos={
                             "MEZ": german_tz,
                         },
@@ -536,39 +604,48 @@ def find_google_search_export(zipfile_ref):
 
     # First try JSON files
     json_files = [f for f in zipfile_ref.namelist() if f.lower().endswith(".json")]
-    for file in json_files:
+
+    if not json_files:
+        logger.info("No JSON files found in archive.")
+        
+    for f in json_files:
         try:
-            with zipfile_ref.open(file) as f:
-                data = parse_google_search_json(f)
-                if data:
-                    logger.info(f"Found Google Search data in {file}")
-                    return data
-        except (zipfile.BadZipFile, IOError, UnicodeDecodeError) as e:
+            with zipfile_ref.open(f) as file:
+                parsed_data = parse_google_search_json(file)
+                if parsed_data:
+                    logger.info(f"Found search data in JSON file: {f}")
+                    return parsed_data
+        except Exception as e:
+            logger.warning(f"Error parsing JSON file {f}: {e}")
             continue
 
+    
     # Try HTML files
     html_files = [f for f in zipfile_ref.namelist() if f.lower().endswith(".html")]
-    for file in html_files:
+    
+    if not html_files:
+        logger.info("No HTML files found in archive.")
+    
+    for f in html_files:
         try:
-            with zipfile_ref.open(file) as f:
-                html_content = f.read().decode("utf-8")
-                data = parse_google_search_html(html_content)
-                if data:
-                    logger.info(f"Found Google Search data in {file}")
-                    return data
-        except (zipfile.BadZipFile, IOError, UnicodeDecodeError) as e:
+            with zipfile_ref.open(f) as file:
+                html_content = file.read().decode("utf-8")
+                parsed_data = parse_google_search_html(html_content)
+                if parsed_data:
+                    logger.info(f"Found search data in HTML file: {f}")
+                    return parsed_data
+        except Exception as e:
+            logger.warning(f"Error parsing HTML file {f}: {e}")
             continue
+            
 
     # Check if this is a Google Takeout archive
-    for html_file in html_files:
-        try:
-            with zipfile_ref.open(html_file) as f:
-                content = f.read().decode("utf-8")
-                if "Google" in content:
-                    logger.error("Google Takeout archive found but no search data")
-                    raise NoGoogleSearchDataError()
-        except (zipfile.BadZipFile, IOError, UnicodeDecodeError) as e:
-            continue
+    all_filenames = zipfile_ref.namelist()
+    has_takeout = any("takeout" in f.lower() for f in all_filenames)
 
-    logger.error("No valid Google Takeout data found in zip file")
-    raise GoogleTakeoutNotFoundError("No valid Google Takeout data found in zip file")
+    if has_takeout:
+        logger.error("Takeout folder found, but no search data detected.")
+        raise NoGoogleSearchDataError()
+    else:
+        logger.error("No indicators of a Google Takeout folder found.")
+        raise GoogleTakeoutNotFoundError("No valid Google Takeout data found in zip file")
